@@ -26,6 +26,8 @@ vendor/
 # Build and cache output
 dist/
 build/
+target/
+*.class
 coverage/
 .cache/
 tmp/
