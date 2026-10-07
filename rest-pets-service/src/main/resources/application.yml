@@ -1,0 +1,29 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: rest-pets-service
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when_authorized
+
+soap:
+  pets:
+    base-url: ${SOAP_PETS_BASE_URL:http://localhost:8080/pets}
+    username: ${SOAP_PETS_USERNAME:admin}
+    password: ${SOAP_PETS_PASSWORD:secret}
+    connect-timeout: 3s
+    read-timeout: 10s
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
