@@ -8,21 +8,12 @@
     <artifactId>soap-pets-service</artifactId>
     <version>1.0.0</version>
     <name>SOAP Pets Service</name>
-    <description>Local RPC-style SOAP service with basic auth for dog and cat names</description>
+    <description>Local RPC/encoded SOAP service with basic auth for dog and cat names</description>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>21</maven.compiler.release>
-        <jaxws.version>4.0.3</jaxws.version>
     </properties>
-
-    <dependencies>
-        <dependency>
-            <groupId>com.sun.xml.ws</groupId>
-            <artifactId>jaxws-rt</artifactId>
-            <version>${jaxws.version}</version>
-        </dependency>
-    </dependencies>
 
     <build>
         <plugins>

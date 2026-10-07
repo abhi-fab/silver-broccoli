@@ -1,6 +1,9 @@
 # SOAP Pets Service
 
-Local **RPC/literal** SOAP sample with HTTP Basic Auth.
+Local **RPC/encoded** SOAP sample with HTTP Basic Auth.
+
+The WSDL binding uses `style="rpc"` and `use="encoded"` with
+`encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"`.
 
 ## Operations
 
