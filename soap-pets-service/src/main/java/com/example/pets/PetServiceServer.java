@@ -10,6 +10,8 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -28,12 +30,16 @@ public final class PetServiceServer {
     private static final String NAMESPACE = "http://example.com/pets";
     private static final String SOAP_ENCODING = "http://schemas.xmlsoap.org/soap/encoding/";
     private static final Pattern OPERATION =
-            Pattern.compile("<(?:[\\w.]+:)?(ListDogs|ListCats)\\b", Pattern.CASE_INSENSITIVE);
+            Pattern.compile("<(?:[\\w.]+:)?(ListDogs|ListCats|AddPet)\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern PARAM =
+            Pattern.compile(
+                    "<(?:[\\w.]+:)?(name|type)\\b[^>]*>([^<]*)</(?:[\\w.]+:)?\\1\\s*>",
+                    Pattern.CASE_INSENSITIVE);
 
-    private static final List<String> DOGS =
-            List.of("Buddy", "Max", "Bella", "Charlie", "Lucy");
-    private static final List<String> CATS =
-            List.of("Whiskers", "Luna", "Oliver", "Milo", "Simba");
+    private static final List<String> DOGS = new CopyOnWriteArrayList<>(
+            List.of("Buddy", "Max", "Bella", "Charlie", "Lucy"));
+    private static final List<String> CATS = new CopyOnWriteArrayList<>(
+            List.of("Whiskers", "Luna", "Oliver", "Milo", "Simba"));
 
     private PetServiceServer() {
     }
@@ -58,7 +64,7 @@ public final class PetServiceServer {
         System.out.println("  WSDL     : " + baseUrl + "?wsdl");
         System.out.println("  Auth     : basic (" + USERNAME + " / " + PASSWORD + ")");
         System.out.println("  Style    : RPC/encoded");
-        System.out.println("  Ops      : ListDogs, ListCats");
+        System.out.println("  Ops      : ListDogs, ListCats, AddPet");
     }
 
     private static void handle(HttpExchange exchange) throws IOException {
@@ -84,8 +90,13 @@ public final class PetServiceServer {
             }
 
             String operation = matcher.group(1);
+            if ("AddPet".equalsIgnoreCase(operation)) {
+                handleAddPet(exchange, body);
+                return;
+            }
+
             List<String> names = "ListDogs".equalsIgnoreCase(operation) ? DOGS : CATS;
-            write(exchange, 200, "text/xml; charset=utf-8", soapResponse(operation, names));
+            write(exchange, 200, "text/xml; charset=utf-8", soapListResponse(operation, names));
         } catch (Exception e) {
             write(exchange, 500, "text/xml; charset=utf-8", soapFault("Server", e.getMessage()));
         } finally {
@@ -93,7 +104,49 @@ public final class PetServiceServer {
         }
     }
 
-    private static String soapResponse(String operation, List<String> names) {
+    private static void handleAddPet(HttpExchange exchange, String body) throws IOException {
+        String name = null;
+        String type = null;
+        Matcher paramMatcher = PARAM.matcher(body);
+        while (paramMatcher.find()) {
+            String param = paramMatcher.group(1);
+            String value = xmlUnescape(paramMatcher.group(2).trim());
+            if ("name".equalsIgnoreCase(param)) {
+                name = value;
+            } else if ("type".equalsIgnoreCase(param)) {
+                type = value;
+            }
+        }
+
+        if (name == null || name.isBlank()) {
+            write(exchange, 500, "text/xml; charset=utf-8",
+                    soapFault("Client", "AddPet requires a non-empty name"));
+            return;
+        }
+        if (type == null || type.isBlank()) {
+            write(exchange, 500, "text/xml; charset=utf-8",
+                    soapFault("Client", "AddPet requires a type of dog or cat"));
+            return;
+        }
+
+        String normalizedType = type.trim().toLowerCase(Locale.ROOT);
+        List<String> target;
+        if ("dog".equals(normalizedType) || "dogs".equals(normalizedType)) {
+            target = DOGS;
+        } else if ("cat".equals(normalizedType) || "cats".equals(normalizedType)) {
+            target = CATS;
+        } else {
+            write(exchange, 500, "text/xml; charset=utf-8",
+                    soapFault("Client", "AddPet type must be dog or cat"));
+            return;
+        }
+
+        target.add(name);
+        write(exchange, 200, "text/xml; charset=utf-8",
+                soapScalarResponse("AddPet", name));
+    }
+
+    private static String soapListResponse(String operation, List<String> names) {
         StringBuilder items = new StringBuilder();
         for (String name : names) {
             items.append("<item xsi:type=\"xsd:string\">")
@@ -128,6 +181,28 @@ public final class PetServiceServer {
         );
     }
 
+    private static String soapScalarResponse(String operation, String value) {
+        return """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+                                  xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+                                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                                  xmlns:pets="%s">
+                  <soapenv:Body>
+                    <pets:%sResponse soapenv:encodingStyle="%s">
+                      <return xsi:type="xsd:string">%s</return>
+                    </pets:%sResponse>
+                  </soapenv:Body>
+                </soapenv:Envelope>
+                """.formatted(
+                NAMESPACE,
+                operation,
+                SOAP_ENCODING,
+                xmlEscape(value),
+                operation
+        );
+    }
+
     private static String soapFault(String code, String message) {
         return """
                 <?xml version="1.0" encoding="UTF-8"?>
@@ -158,6 +233,13 @@ public final class PetServiceServer {
                   <wsdl:message name="ListCatsResponse">
                     <wsdl:part name="return" type="xsd:string"/>
                   </wsdl:message>
+                  <wsdl:message name="AddPetRequest">
+                    <wsdl:part name="name" type="xsd:string"/>
+                    <wsdl:part name="type" type="xsd:string"/>
+                  </wsdl:message>
+                  <wsdl:message name="AddPetResponse">
+                    <wsdl:part name="return" type="xsd:string"/>
+                  </wsdl:message>
 
                   <wsdl:portType name="PetServicePortType">
                     <wsdl:operation name="ListDogs">
@@ -167,6 +249,10 @@ public final class PetServiceServer {
                     <wsdl:operation name="ListCats">
                       <wsdl:input message="tns:ListCatsRequest"/>
                       <wsdl:output message="tns:ListCatsResponse"/>
+                    </wsdl:operation>
+                    <wsdl:operation name="AddPet">
+                      <wsdl:input message="tns:AddPetRequest"/>
+                      <wsdl:output message="tns:AddPetResponse"/>
                     </wsdl:operation>
                   </wsdl:portType>
 
@@ -194,6 +280,17 @@ public final class PetServiceServer {
                                    encodingStyle="%s"/>
                       </wsdl:output>
                     </wsdl:operation>
+                    <wsdl:operation name="AddPet">
+                      <soap:operation soapAction="" style="rpc"/>
+                      <wsdl:input>
+                        <soap:body use="encoded" namespace="%s"
+                                   encodingStyle="%s"/>
+                      </wsdl:input>
+                      <wsdl:output>
+                        <soap:body use="encoded" namespace="%s"
+                                   encodingStyle="%s"/>
+                      </wsdl:output>
+                    </wsdl:operation>
                   </wsdl:binding>
 
                   <wsdl:service name="PetService">
@@ -204,6 +301,8 @@ public final class PetServiceServer {
                 </wsdl:definitions>
                 """.formatted(
                 NAMESPACE, NAMESPACE,
+                NAMESPACE, SOAP_ENCODING,
+                NAMESPACE, SOAP_ENCODING,
                 NAMESPACE, SOAP_ENCODING,
                 NAMESPACE, SOAP_ENCODING,
                 NAMESPACE, SOAP_ENCODING,
@@ -230,5 +329,14 @@ public final class PetServiceServer {
                 .replace(">", "&gt;")
                 .replace("\"", "&quot;")
                 .replace("'", "&apos;");
+    }
+
+    private static String xmlUnescape(String value) {
+        return value
+                .replace("&apos;", "'")
+                .replace("&quot;", "\"")
+                .replace("&gt;", ">")
+                .replace("&lt;", "<")
+                .replace("&amp;", "&");
     }
 }
